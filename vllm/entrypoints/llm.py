@@ -102,6 +102,7 @@ class LLM:
         self,
         model: str,
         tokenizer: Optional[str] = None,
+        #need change mode as "cpm" for 9g tokenizer
         tokenizer_mode: str = "auto",
         skip_tokenizer_init: bool = False,
         trust_remote_code: bool = False,

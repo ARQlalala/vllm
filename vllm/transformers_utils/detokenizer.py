@@ -13,8 +13,13 @@ INVALID_TOKEN_ID = -1
 class Detokenizer:
     """Provides methods to decode the output of a model into text."""
 
-    def __init__(self, tokenizer_group: BaseTokenizerGroup):
-        self.tokenizer_group = tokenizer_group
+    def __init__(self, tokenizer_group: BaseTokenizerGroup, mode="auto"):
+        self.mode = mode
+        if self.mode != "cpm":
+            self.tokenizer_group = tokenizer_group
+        else:
+            self.tokenizer = tokenizer_group
+
 
     def get_tokenizer_for_seq(self,
                               sequence: Sequence) -> "PreTrainedTokenizer":
@@ -39,7 +44,12 @@ class Detokenizer:
         # Only prompt, without the generated token.
         all_token_ids = seq.get_token_ids()
         prompt_token_ids = all_token_ids[:-1]
-        tokenizer = self.get_tokenizer_for_seq(seq)
+
+        if self.mode != "cpm":
+            tokenizer = self.get_tokenizer_for_seq(seq)
+        else:
+            tokenizer = self.tokenizer
+
         prefix_offset = 0
         read_offset = 0
         next_iter_prefix_offset = 0
@@ -66,6 +76,7 @@ class Detokenizer:
                          skip_special_tokens=prms.skip_special_tokens,
                          spaces_between_special_tokens=prms.
                          spaces_between_special_tokens,
+                         mode=self.mode,
                      )
 
                     sample_logprob.decoded_token = new_text
@@ -99,8 +110,12 @@ class Detokenizer:
         """
         all_input_ids = seq.get_token_ids()
         token_id_generated_this_iteration = all_input_ids[-1]
-        tokenizer = self.get_tokenizer_for_seq(seq)
 
+
+        if self.mode != "cpm":
+            tokenizer = self.get_tokenizer_for_seq(seq)
+        else:
+            tokenizer = self.tokenizer
         # Convert prompt token IDs to tokens if necessary.
         # Do it here so that we don't have to repeat this
         # computation for each logprob.
@@ -121,6 +136,7 @@ class Detokenizer:
              read_offset=seq.read_offset,
              skip_special_tokens=prms.skip_special_tokens,
              spaces_between_special_tokens=prms.spaces_between_special_tokens,
+             mode=self.mode,
          )
 
         # Decode logprobs
@@ -146,6 +162,7 @@ class Detokenizer:
                         skip_special_tokens=prms.skip_special_tokens,
                         spaces_between_special_tokens=prms.
                         spaces_between_special_tokens,
+                        mode=self.mode,
                     )
                     sample_logprob.decoded_token = new_text
 
@@ -162,6 +179,7 @@ def _convert_tokens_to_string_with_added_encoders(
     output_tokens: List[str],
     skip_special_tokens: bool,
     spaces_between_special_tokens: bool,
+    mode: str,
 ) -> str:
     # Adapted from
     # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/tokenization_utils.py#L921
@@ -170,7 +188,11 @@ def _convert_tokens_to_string_with_added_encoders(
     # even when the loop body is very simple.
     sub_texts: List[str] = []
     current_sub_text: List[str] = []
-    all_special_tokens = set(tokenizer.all_special_tokens)
+    if mode != "cpm":
+        all_special_tokens = set(tokenizer.all_special_tokens)
+    else:
+        all_special_tokens = tokenizer._special_token_set
+
     for token in output_tokens:
         if skip_special_tokens and token in all_special_tokens:
             continue
@@ -182,9 +204,15 @@ def _convert_tokens_to_string_with_added_encoders(
             sub_texts.append(token)
         else:
             current_sub_text.append(token)
+
     if current_sub_text:
-        sub_text = tokenizer.convert_tokens_to_string(current_sub_text)
+        if mode != "cpm":
+            sub_text = tokenizer.convert_tokens_to_string(current_sub_text)
+        else:
+            sub_text = tokenizer.decode(current_sub_text)
+
         sub_texts.append(sub_text)
+
     if spaces_between_special_tokens:
         return " ".join(sub_texts)
     else:
@@ -229,6 +257,7 @@ def detokenize_incrementally(
     read_offset: int,
     skip_special_tokens: bool = False,
     spaces_between_special_tokens: bool = True,
+    mode: str = "cpm",
 ) -> Tuple[List[str], str, int, int]:
     """Detokenizes the input ids incrementally and returns the new tokens
     and the new text.
@@ -266,7 +295,12 @@ def detokenize_incrementally(
     assert prev_tokens is not None
 
     # If the new token id is out of bounds, return an empty string.
-    if new_token_id >= len(tokenizer):
+
+    if mode == "cpm":
+        vocab_size = tokenizer.vocab_size
+    else:
+        vocab_size = len(tokenizer)
+    if new_token_id >= vocab_size:
         new_tokens = [""]
     else:
         # Put new_token_id in a list so skip_special_tokens is respected
@@ -294,12 +328,14 @@ def detokenize_incrementally(
             output_tokens[prefix_offset:read_offset],
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens,
+            mode=mode,
         )
         new_text = _convert_tokens_to_string_with_added_encoders(
             tokenizer,
             output_tokens[prefix_offset:],
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens,
+            mode=mode,
         )
 
     if len(new_text) <= len(prefix_text) or new_text.endswith("�"):
