@@ -226,7 +226,7 @@ class LLMEngine:
         )
         self.log_stats = log_stats
 
-        if not self.model_config.skip_tokenizer_init and model_config.tokenizer_mode != "cpm"::
+        if not self.model_config.skip_tokenizer_init and model_config.tokenizer_mode != "cpm":
             self.tokenizer = self._init_tokenizer()
             self.detokenizer = Detokenizer(self.tokenizer)
         elif model_config.tokenizer_mode == "cpm":
